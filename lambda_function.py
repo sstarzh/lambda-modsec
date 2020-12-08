@@ -36,7 +36,7 @@ def lambda_handler(event, context):
     host = headers['Host']
     print('Host:' + host)
     operation = event['httpMethod']
-    if operation is not 'GET':
+    if operation != 'GET':
         body = event['body']
     qs = event["queryStringParameters"]
     queryString = ''
@@ -54,13 +54,23 @@ def lambda_handler(event, context):
     protocol = requestContext['protocol'][5:]
     uri = 'https://' + host + path + queryString
     print('URI' + uri)
- #   contentType = headers['Content-Type']
+    identity = requestContext['identity']
+    clientIp = identity['sourceIp']
+    transaction.processConnection(clientIp, 0, host, 443)
     # Process URI
     transaction.processURI(uri, operation, protocol)
     # Process headers
- #   if contentType is not None:
+    if event['body'] != None:
+        contLength = len(event['body'])
+    else:
+        contLength = 0
+    if operation == 'POST' or operation == 'PUT':
+        contentType = headers['Content-Type']
+        transaction.addRequestHeader('Content-Type', contentType)
+        transaction.appendRequestBody(event['body'])
+    transaction.addRequestHeader('Host', host)
+    transaction.addRequestHeader('Content-Length', str(contLength))
     transaction.processRequestHeaders()
- #   if body is not None:
     transaction.processRequestBody()
     intervention = ModSecurityIntervention()
     if transaction.intervention(intervention):
@@ -78,7 +88,13 @@ def lambda_handler(event, context):
     }
 
     if operation in operations:
-        payload = 'modsec' if operation == 'GET' else json.loads(event['body'])
-        return respond(None, operations[operation](tab, payload))
+        if operation == 'GET':
+            return respond(None, operations[operation](tab, 'modsec'))
+        elif operation == 'POST':
+            return respond(None, tab.put_item(Item=json.loads(event['body'])))
+        elif operation == 'PUT':
+            return respond(None, tab.update_item(Item=json.loads(event['body'])))
+        elif operation == 'DELETE':
+            return respond(None, tab.delete_item(Item=json.loads(event['body'])))
     else:
         return respond(ValueError, 'Unsupported method "{}"'.format(operation))
